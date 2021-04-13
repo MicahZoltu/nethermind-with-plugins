@@ -1,0 +1,57 @@
+name: Docker
+
+on:
+  push:
+    # Publish `v1.2.3` tags as releases.
+    tags:
+      - v*
+
+  # Run tests for any PRs.
+  pull_request:
+
+jobs:
+  # Push image to GitHub Packages.
+  # See also https://docs.docker.com/docker-hub/builds/
+  push:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set IMAGE_NAME
+        run: echo "IMAGE_NAME=$(echo ${{ github.repository }} | tr '[A-Z]' '[a-z]')" >> $GITHUB_ENV
+
+      - name: Set VERSIONs
+        run: |
+          [[ "${{ github.ref }}" != "refs/tags/v"* ]] && echo "Expected tag to be of the form v#.#.#-#.#.#-#.#.#" && exit 1
+          # Strip git ref prefix and leading `v` from version
+          VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/v\(.*\),\1,')
+          # Extract Nethermind version
+          NETHERMIND_VERSION=$(echo $VERSION | cut -d - -f 1)
+          # Extract Websocket Push version
+          PUSH_VERSION=$(echo $VERSION | cut -d - -f 2)
+          # Extract Multicall version
+          MULTICALL_VERSION=$(echo $VERSION | cut -d - -f 3)
+
+          # ensure we have versions for everything
+          [[ $NETHERMIND_VERSION == "" ]] && echo "Nethermind version missing from tag." && exit 1
+          [[ $PUSH_VERSION == "" ]] && echo "Push plugin version missing from tag." && exit 1
+          [[ $MULTICALL_VERSION == "" ]] && echo "Multicall plugin version missing from tag." && exit 1
+
+          echo VERSION=$VERSION >> $GITHUB_ENV
+          echo NETHERMIND_VERSION=$NETHERMIND_VERSION >> $GITHUB_ENV
+          echo PUSH_VERSION=$PUSH_VERSION >> $GITHUB_ENV
+          echo MULTICALL_VERSION=$MULTICALL_VERSION >> $GITHUB_ENV
+
+      - name: set IMAGE_TAG
+        run: echo IMAGE_TAG=ghcr.io/$IMAGE_NAME:$VERSION >> $GITHUB_ENV
+
+      - name: Build image
+        run: docker build . --file Dockerfile --build-arg NETHERMIND_VERSION --build-arg PUSH_VERSION --build-arg MULTICALL_VERSION --tag $IMAGE_TAG
+
+      - name: Log into registry
+        run: echo "${{ secrets.ContainerRegistry }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Push image
+        run: docker push $IMAGE_TAG
